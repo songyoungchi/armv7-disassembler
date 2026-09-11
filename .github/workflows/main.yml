@@ -1,14 +1,12 @@
-name: Build armv7-disassembler for Termux
+name: Build armv7 Disassembler CLI for Termux
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
-  build-armv7:
+  build-armv7-cli:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,27 +21,83 @@ jobs:
     - name: Install cargo-ndk
       run: cargo install cargo-ndk
 
-    - name: Set up Android NDK
+    - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
       with:
         ndk-version: r26b
         add-to-path: true
 
-    - name: Build with cargo-ndk (armeabi-v7a)
+    - name: Create CLI wrapper project
       run: |
-        cargo ndk -t armeabi-v7a -o ./jniLibs build --release
+        mkdir -p src
+        cat > Cargo.toml << 'EOF'
+        [package]
+        name = "armv7-disasm-cli"
+        version = "0.1.0"
+        edition = "2021"
 
-    - name: Locate built binary
+        [dependencies]
+        armv7-disassembler = { git = "https://github.com/songyoungchi/armv7-disassembler.git", branch = "main" }
+
+        [profile.release]
+        lto = true
+        strip = true
+        EOF
+
+        cat > src/main.rs << 'EOF'
+        use armv7_disassembler::prelude::*;
+        use std::env;
+        use std::fs;
+        use std::process;
+
+        fn main() {
+            let args: Vec<String> = env::args().collect();
+            if args.len() < 2 {
+                eprintln!("Usage: {} <binary-file> [start-address-hex] [little|big]", args[0]);
+                eprintln!("Example: {} firmware.bin 0x8000 little", args[0]);
+                process::exit(1);
+            }
+
+            let file_path = &args[1];
+            let start_addr = args.get(2)
+                .map(|s| u32::from_str_radix(s.trim_start_matches("0x"), 16).unwrap_or(0))
+                .unwrap_or(0);
+            let endian = match args.get(3).map(|s| s.as_str()) {
+                Some("big") => Endian::Big,
+                _ => Endian::Little,
+            };
+
+            let bytes = fs::read(file_path).unwrap_or_else(|e| {
+                eprintln!("Error reading file: {}", e);
+                process::exit(1);
+            });
+
+            let instructions = Decoder::new()
+                .start_address(start_addr)
+                .endian(endian)
+                .disassemble(&bytes)
+                .unwrap_or_else(|e| {
+                    eprintln!("Disassembly error: {:?}", e);
+                    process::exit(1);
+                });
+
+            for instr in instructions {
+                println!("{}", instr);
+            }
+        }
+        EOF
+
+    - name: Build for armeabi-v7a (API 27)
       run: |
-        find ./jniLibs -name "armv7-disassembler*" -o -name "*.so" | head -20
-        # 如果项目是二进制 crate，产物通常在 target/armv7-linux-androideabi/release/ 下
-        ls -la target/armv7-linux-androideabi/release/ 2>/dev/null || true
+        cargo ndk -t armeabi-v7a -p 27 -o ./jniLibs build --release
 
-    - name: Upload binary artifact
+    - name: Verify binary exists
+      run: |
+        ls -la target/armv7-linux-androideabi/release/armv7-disasm-cli
+        file target/armv7-linux-androideabi/release/armv7-disasm-cli
+
+    - name: Upload CLI binary
       uses: actions/upload-artifact@v4
       with:
-        name: armv7-disassembler-binary
-        path: |
-          target/armv7-linux-androideabi/release/
-          jniLibs/
-        if-no-files-found: warn
+        name: armv7-disasm-cli
+        path: target/armv7-linux-androideabi/release/armv7-disasm-cli
