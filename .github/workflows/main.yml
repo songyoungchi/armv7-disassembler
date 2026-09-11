@@ -89,7 +89,7 @@ jobs:
 
     - name: Build for armeabi-v7a (API 27)
       run: |
-        cargo ndk -t armeabi-v7a -p 27 -o ./jniLibs build --release
+        cargo ndk -t armeabi-v7a --platform 27 -o ./jniLibs build --release
 
     - name: Verify binary exists
       run: |
