@@ -1,0 +1,49 @@
+name: Build armv7-disassembler for Termux
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-armv7:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: armv7-linux-androideabi
+
+    - name: Install cargo-ndk
+      run: cargo install cargo-ndk
+
+    - name: Set up Android NDK
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r26b
+        add-to-path: true
+
+    - name: Build with cargo-ndk (armeabi-v7a)
+      run: |
+        cargo ndk -t armeabi-v7a -o ./jniLibs build --release
+
+    - name: Locate built binary
+      run: |
+        find ./jniLibs -name "armv7-disassembler*" -o -name "*.so" | head -20
+        # 如果项目是二进制 crate，产物通常在 target/armv7-linux-androideabi/release/ 下
+        ls -la target/armv7-linux-androideabi/release/ 2>/dev/null || true
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: armv7-disassembler-binary
+        path: |
+          target/armv7-linux-androideabi/release/
+          jniLibs/
+        if-no-files-found: warn
